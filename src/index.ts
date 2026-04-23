@@ -10,45 +10,49 @@ export default {
       });
     }
 
-    const modelMap = {
+    const modelConfigs = {
       image: {
-        id: "@cf/alibaba/wan-2.6-image",
+        ids: ["alibaba/wan-2.6-image", "@cf/alibaba/wan-2.6-image", "wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
         mime: "image/png",
         label: "图像生成 (Wan 2.6)",
       },
       music: {
-        id: "@cf/minimax/music-2.6",
+        ids: ["minimax/music-2.6", "@cf/minimax/music-2.6", "music-2.6"],
         mime: "audio/mpeg",
         label: "音乐生成 (MiniMax 2.6)",
       },
       video: {
-        id: "@cf/pixverse/v5.6",
+        ids: ["pixverse/v5.6", "@cf/pixverse/v5.6", "pixverse-v5.6"],
         mime: "video/mp4",
         label: "视频生成 (PixVerse v5.6)",
       },
     };
 
-    const config = modelMap[type];
-
+    const config = modelConfigs[type];
     if (!config) {
       return new Response(`不支持的生成类型: ${type}。可选: image, music, video`, { status: 400 });
     }
 
-    try {
-      const response = await env.AI.run(config.id, { prompt });
-
-      return new Response(response, {
-        headers: {
-          "content-type": config.mime,
-          "x-model-used": config.id,
-        },
-      });
-    } catch (e) {
-      return new Response(`生成失败 [${config.label}]: ${e.message}`, { 
-        status: 500,
-        headers: { "content-type": "text/plain;charset=UTF-8" } 
-      });
+    let lastError = "";
+    for (const modelId of config.ids) {
+      try {
+        const response = await env.AI.run(modelId, { prompt });
+        return new Response(response, {
+          headers: {
+            "content-type": config.mime,
+            "x-model-used": modelId,
+          },
+        });
+      } catch (e) {
+        lastError = e.message;
+        console.log(`Model ${modelId} failed: ${e.message}`);
+      }
     }
+
+    return new Response(`所有尝试的模型均失败。最后一次错误: ${lastError}`, { 
+      status: 500,
+      headers: { "content-type": "text/plain;charset=UTF-8" } 
+    });
   },
 
   getHTMLPage() {
@@ -101,9 +105,9 @@ export default {
           
           resDiv.style.display = 'block';
           outDiv.innerHTML = '';
-          statusP.innerText = '🚀 正在调用云端 GPU 生成中...';
+          statusP.innerText = '🚀 正在尝试多个模型生成中...';
 
-          const url = `?prompt=${encodeURIComponent(prompt)}&type=${type}`;
+          const url = \`?prompt=\${encodeURIComponent(prompt)}&type=\${type}\`;
           
           try {
             const response = await fetch(url);
@@ -114,11 +118,11 @@ export default {
             
             statusP.innerText = '✨ 生成成功！';
             if(type === 'image') {
-              outDiv.innerHTML = `<img src="${objectUrl}">`;
+              outDiv.innerHTML = \`<img src="\${objectUrl}">\`;
             } else if(type === 'music') {
-              outDiv.innerHTML = `<audio controls src="${objectUrl}" autoplay>`;
+              outDiv.innerHTML = \`<audio controls src="\${objectUrl}" autoplay>\`;
             } else if(type === 'video') {
-              outDiv.innerHTML = `<video controls src="${objectUrl}" autoplay loop>`;
+              outDiv.innerHTML = \`<video controls src="\${objectUrl}" autoplay loop>\`;
             }
           } catch(e) {
             statusP.innerText = '❌ 错误: ' + e.message;
