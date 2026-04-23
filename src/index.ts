@@ -12,17 +12,17 @@ export default {
 
     const modelConfigs = {
       image: {
-        ids: ["alibaba/wan-2.6-image", "@cf/alibaba/wan-2.6-image", "wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
+        ids: ["alibaba/wan-2.6-image", "@cf/alibaba/wan-2.6-image", "wan-2.6-image", "alibaba-wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
         mime: "image/png",
         label: "图像生成 (Wan 2.6)",
       },
       music: {
-        ids: ["minimax/music-2.6", "@cf/minimax/music-2.6", "music-2.6"],
+        ids: ["minimax/music-2.6", "@cf/minimax/music-2.6", "music-2.6", "minimax-music-2.6"],
         mime: "audio/mpeg",
         label: "音乐生成 (MiniMax 2.6)",
       },
       video: {
-        ids: ["pixverse/v5.6", "@cf/pixverse/v5.6", "pixverse-v5.6"],
+        ids: ["pixverse/v5.6", "@cf/pixverse/v5.6", "pixverse-v5.6", "pixverse/v5.6-video"],
         mime: "video/mp4",
         label: "视频生成 (PixVerse v5.6)",
       },
@@ -36,12 +36,44 @@ export default {
     let lastError = "";
     for (const modelId of config.ids) {
       try {
-        const response = await env.AI.run(modelId, { prompt });
-        return new Response(response, {
-          headers: {
-            "content-type": config.mime,
-            "x-model-used": modelId,
-          },
+        const result = await env.AI.run(modelId, { prompt });
+        
+        // Check if result is a task (async model)
+        if (result && typeof result === 'object' && result.id) {
+          const taskId = result.id;
+          let status = 'pending';
+          let finalResult = null;
+          let attempts = 0;
+
+          while (status !== 'completed' && attempts < 30) {
+            await new Promise(r => setTimeout(r, 2000)); // Poll every 2s
+            const pollRes = await env.AI.getTaskStatus(taskId);
+            status = pollRes.status;
+            if (status === 'completed') {
+              finalResult = pollRes.result;
+              break;
+            }
+            if (status === 'failed') {
+              throw new Error(`Task failed: ${pollRes.error}`);
+            }
+            attempts++;
+          }
+
+          if (!finalResult) throw new Error("Generation timed out");
+          
+          // The finalResult for async models might be a URL or binary
+          const responseData = typeof finalResult === 'string' && finalResult.startsWith('http') 
+            ? await fetch(finalResult).then(r => r.arrayBuffer())
+            : finalResult;
+
+          return new Response(responseData, {
+            headers: { "content-type": config.mime, "x-model-used": modelId },
+          });
+        }
+
+        // Sync model result
+        return new Response(result, {
+          headers: { "content-type": config.mime, "x-model-used": modelId },
         });
       } catch (e) {
         lastError = e.message;
@@ -105,7 +137,7 @@ export default {
           
           resDiv.style.display = 'block';
           outDiv.innerHTML = '';
-          statusP.innerText = '🚀 正在尝试多个模型生成中...';
+          statusP.innerText = '🚀 正在调用云端 GPU 生成中...';
 
           const url = \`?prompt=\${encodeURIComponent(prompt)}&type=\${type}\`;
           
