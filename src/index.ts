@@ -10,24 +10,24 @@ export default {
       });
     }
 
-    // 经过精细化修正后的模型 ID 映射表
     const modelConfigs = {
       image: {
-        ids: ["alibaba/wan-2.6-image", "wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
+        ids: ["alibaba/wan-2.6-image", "wan-2.6-image", "@cf/alibaba/wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
         mime: "image/png",
         label: "图像生成 (Wan 2.6)",
+        ext: "png",
       },
       music: {
-        // 尝试所有可能的 MiniMax 命名组合
         ids: ["minimax/music-2.6", "minimax-music-2.6", "music-2.6", "@cf/minimax/music-2.6"],
         mime: "audio/mpeg",
         label: "音乐生成 (MiniMax 2.6)",
+        ext: "mp3",
       },
       video: {
-        // 尝试所有可能的 PixVerse 命名组合
         ids: ["pixverse/v5.6", "pixverse-v5.6", "pixverse/v5.6-video", "@cf/pixverse/v5.6"],
         mime: "video/mp4",
         label: "视频生成 (PixVerse v5.6)",
+        ext: "mp4",
       },
     };
 
@@ -41,14 +41,12 @@ export default {
       try {
         const result = await env.AI.run(modelId, { prompt });
         
-        // 异步任务处理 (Task ID 模式)
         if (result && typeof result === 'object' && result.id) {
           const taskId = result.id;
           let status = 'pending';
           let finalResult = null;
           let attempts = 0;
 
-          // 增加轮询次数到 60 次 (约 120 秒)，应对视频/音频生成慢的问题
           while (status !== 'completed' && attempts < 60) {
             await new Promise(r => setTimeout(r, 2000));
             const pollRes = await env.AI.getTaskStatus(taskId);
@@ -65,23 +63,28 @@ export default {
 
           if (!finalResult) throw new Error("生成超时，请稍后在控制台查看结果");
           
-          // 处理结果可能是 URL 的情况
           const responseData = typeof finalResult === 'string' && finalResult.startsWith('http') 
             ? await fetch(finalResult).then(r => r.arrayBuffer())
             : finalResult;
 
           return new Response(responseData, {
-            headers: { "content-type": config.mime, "x-model-used": modelId },
+            headers: { 
+              "content-type": config.mime, 
+              "x-model-used": modelId,
+              "content-disposition": `attachment; filename="generated.${config.ext}"` 
+            },
           });
         }
 
-        // 同步结果返回
         return new Response(result, {
-          headers: { "content-type": config.mime, "x-model-used": modelId },
+          headers: { 
+            "content-type": config.mime, 
+            "x-model-used": modelId,
+            "content-disposition": `attachment; filename="generated.${config.ext}"` 
+          },
         });
       } catch (e) {
         lastError = e.message;
-        console.log(`Model ${modelId} failed: ${e.message}`);
       }
     }
 
@@ -109,6 +112,8 @@ export default {
         button:hover { background: #005BBF; }
         .result { margin-top: 2rem; display: none; }
         .result img, .result video { max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .download-btn { margin-top: 1rem; background: #34C759; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; display: inline-block; text-decoration: none; }
+        .download-btn:hover { background: #28a745; }
       </style>
     </head>
     <body>
@@ -126,6 +131,7 @@ export default {
         <div id="result" class="result">
           <p id="status">正在生成，请稍候...</p>
           <div id="output"></div>
+          <a id="downloadLink" class="download-btn" style="display:none">⬇️ 下载文件</a>
         </div>
       </div>
 
@@ -138,10 +144,12 @@ export default {
           const resDiv = document.getElementById('result');
           const outDiv = document.getElementById('output');
           const statusP = document.getElementById('status');
+          const dlLink = document.getElementById('downloadLink');
           
           resDiv.style.display = 'block';
           outDiv.innerHTML = '';
-          statusP.innerText = '🚀 正在尝试多个模型生成中...';
+          dlLink.style.display = 'none';
+          statusP.innerText = '🚀 正在调用云端 GPU 生成中...';
 
           const url = \`?prompt=\${encodeURIComponent(prompt)}&type=\${type}\`;
           
@@ -160,6 +168,13 @@ export default {
             } else if(type === 'video') {
               outDiv.innerHTML = \`<video controls src="\${objectUrl}" autoplay loop>\`;
             }
+            
+            // Setup download link
+            const ext = type === 'image' ? 'png' : (type === 'music' ? 'mp3' : 'mp4');
+            dlLink.href = objectUrl;
+            dlLink.download = \`generated.\${ext}\`;
+            dlLink.style.display = 'inline-block';
+            
           } catch(e) {
             statusP.innerText = '❌ 错误: ' + e.message;
           }
