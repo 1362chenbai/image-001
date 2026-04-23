@@ -10,19 +10,22 @@ export default {
       });
     }
 
+    // 经过精细化修正后的模型 ID 映射表
     const modelConfigs = {
       image: {
-        ids: ["alibaba/wan-2.6-image", "@cf/alibaba/wan-2.6-image", "wan-2.6-image", "alibaba-wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
+        ids: ["alibaba/wan-2.6-image", "wan-2.6-image", "@cf/stabilityai/stable-diffusion-xl-base-1.0"],
         mime: "image/png",
         label: "图像生成 (Wan 2.6)",
       },
       music: {
-        ids: ["minimax/music-2.6", "@cf/minimax/music-2.6", "music-2.6", "minimax-music-2.6"],
+        // 尝试所有可能的 MiniMax 命名组合
+        ids: ["minimax/music-2.6", "minimax-music-2.6", "music-2.6", "@cf/minimax/music-2.6"],
         mime: "audio/mpeg",
         label: "音乐生成 (MiniMax 2.6)",
       },
       video: {
-        ids: ["pixverse/v5.6", "@cf/pixverse/v5.6", "pixverse-v5.6", "pixverse/v5.6-video"],
+        // 尝试所有可能的 PixVerse 命名组合
+        ids: ["pixverse/v5.6", "pixverse-v5.6", "pixverse/v5.6-video", "@cf/pixverse/v5.6"],
         mime: "video/mp4",
         label: "视频生成 (PixVerse v5.6)",
       },
@@ -38,15 +41,16 @@ export default {
       try {
         const result = await env.AI.run(modelId, { prompt });
         
-        // Check if result is a task (async model)
+        // 异步任务处理 (Task ID 模式)
         if (result && typeof result === 'object' && result.id) {
           const taskId = result.id;
           let status = 'pending';
           let finalResult = null;
           let attempts = 0;
 
-          while (status !== 'completed' && attempts < 30) {
-            await new Promise(r => setTimeout(r, 2000)); // Poll every 2s
+          // 增加轮询次数到 60 次 (约 120 秒)，应对视频/音频生成慢的问题
+          while (status !== 'completed' && attempts < 60) {
+            await new Promise(r => setTimeout(r, 2000));
             const pollRes = await env.AI.getTaskStatus(taskId);
             status = pollRes.status;
             if (status === 'completed') {
@@ -59,9 +63,9 @@ export default {
             attempts++;
           }
 
-          if (!finalResult) throw new Error("Generation timed out");
+          if (!finalResult) throw new Error("生成超时，请稍后在控制台查看结果");
           
-          // The finalResult for async models might be a URL or binary
+          // 处理结果可能是 URL 的情况
           const responseData = typeof finalResult === 'string' && finalResult.startsWith('http') 
             ? await fetch(finalResult).then(r => r.arrayBuffer())
             : finalResult;
@@ -71,7 +75,7 @@ export default {
           });
         }
 
-        // Sync model result
+        // 同步结果返回
         return new Response(result, {
           headers: { "content-type": config.mime, "x-model-used": modelId },
         });
@@ -137,7 +141,7 @@ export default {
           
           resDiv.style.display = 'block';
           outDiv.innerHTML = '';
-          statusP.innerText = '🚀 正在调用云端 GPU 生成中...';
+          statusP.innerText = '🚀 正在尝试多个模型生成中...';
 
           const url = \`?prompt=\${encodeURIComponent(prompt)}&type=\${type}\`;
           
